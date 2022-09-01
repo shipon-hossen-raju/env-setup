@@ -2,33 +2,19 @@ using namespace System.Management.Automation
 using namespace System.Management.Automation.Language
 
 # functions
-function mcd { 
+function rmf {
+    rm @args -re -fo
+}
+
+function mcd {
+    param (
+        [switch]$code
+    )
     mkdir @args; cd @args 
+    if ($code) {code .}
 }
 
 # git automations
-function Git-Init() {
-    param($repo)
-
-    # Creating private repository on github
-    gh repo create $repo --private
-    mcd $repo;
-    # Initializing local git repo
-    git init;
-    # creating neccessary files
-    ni .gitignore, .gitattributes, LICENSE, README.md;
-    # adding content to the files
-    Add-Content -Path .gitignore -Value "node_modules";
-    Add-Content -Path .gitattributes -Value "# Auto detect text files and perform LF normalization`n* text=auto";
-    Add-Content -Path LICENSE -Value "MIT License`nCopyright (c) 2022 Tasnimul Hasan`nPermission is hereby granted, free of charge, to any person obtaining a copy`nof this software and associated documentation files (the `"Software`"), to deal`nin the Software without restriction, including without limitation the rights`nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell`ncopies of the Software, and to permit persons to whom the Software is`nfurnished to do so, subject to the following conditions:`nThe above copyright notice and this permission notice shall be included in all`ncopies or substantial portions of the Software.`nTHE SOFTWARE IS PROVIDED `"AS IS`", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR`nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,`nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE`nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER`nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,`nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE`nSOFTWARE."; 
-    Add-Content -Path README.md -Value "Hello Shobaike";
-
-    # pushing to github
-    ghc "Initial Commit" https://github.com/Tasnimul-Hasan/$repo`.git main;
-}
-
-set-alias -name ghi -value Git-Init
-
 function Git-Commit() {
     param(
         [string] $message,
@@ -89,74 +75,41 @@ Import-Module -Name posh-git
 
 oh-my-posh init pwsh --config $env:POSH_THEMES_PATH\star.omp.json | Invoke-Expression
 
-Clear-Host
-
-
-# PSReadLine
-Set-PSReadLineKeyHandler -Key UpArrow -Function HistorySearchBackward
-Set-PSReadLineKeyHandler -Key DownArrow -Function HistorySearchForward
-
-Set-PSReadLineKeyHandler -Key F7 `
-                         -BriefDescription History `
-                         -LongDescription 'Show command history' `
-                         -ScriptBlock {
-    $pattern = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$pattern, [ref]$null)
-    if ($pattern)
-    {
-        $pattern = [regex]::Escape($pattern)
-    }
-
-    $history = [System.Collections.ArrayList]@(
-        $last = ''
-        $lines = ''
-        foreach ($line in [System.IO.File]::ReadLines((Get-PSReadLineOption).HistorySavePath))
-        {
-            if ($line.EndsWith('`'))
-            {
-                $line = $line.Substring(0, $line.Length - 1)
-                $lines = if ($lines)
-                {
-                    "$lines`n$line"
-                }
-                else
-                {
-                    $line
-                }
-                continue
-            }
-
-            if ($lines)
-            {
-                $line = "$lines`n$line"
-                $lines = ''
-            }
-
-            if (($line -cne $last) -and (!$pattern -or ($line -match $pattern)))
-            {
-                $last = $line
-                $line
-            }
-        }
-    )
-    $history.Reverse()
-
-    $command = $history | Out-GridView -Title History -PassThru
-    if ($command)
-    {
-        [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-        [Microsoft.PowerShell.PSConsoleReadLine]::Insert(($command -join "`n"))
-    }
+# Import the Chocolatey Profile that contains the necessary code to enable
+# tab-completions to function for `choco`.
+# Be aware that if you are missing these lines from your profile, tab completion
+# for `choco` will not function.
+# See https://ch0.co/tab-completion for details.
+$ChocolateyProfile = "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+if (Test-Path($ChocolateyProfile)) {
+  Import-Module "$ChocolateyProfile"
 }
 
-Set-PSReadLineKeyHandler -Chord 'Ctrl+d,Ctrl+c' -Function CaptureScreen
-Set-PSReadLineKeyHandler -Key Alt+d -Function ShellKillWord
-Set-PSReadLineKeyHandler -Key Alt+Backspace -Function ShellBackwardKillWord
-Set-PSReadLineKeyHandler -Key Alt+b -Function ShellBackwardWord
-Set-PSReadLineKeyHandler -Key Alt+f -Function ShellForwardWord
-Set-PSReadLineKeyHandler -Key Alt+B -Function SelectShellBackwardWord
-Set-PSReadLineKeyHandler -Key Alt+F -Function SelectShellForwardWord
+# Clear-Host
 
+# PSReadLine
+Set-PSReadLineOption -PredictionSource History
+Set-PSReadLineOption -PredictionViewStyle ListView
+Set-PSReadLineOption -EditMode Windows
+
+# Sometimes you enter a command but realize you forgot to do something else first.
+# This binding will let you save that command in the history so you can recall it,
+# but it doesn't actually execute.  It also clears the line with RevertLine so the
+# undo stack is reset - though redo will still reconstruct the command line.
+Set-PSReadLineKeyHandler -Key Alt+w `
+                         -BriefDescription SaveInHistory `
+                         -LongDescription "Save current line in history but do not execute" `
+                         -ScriptBlock {
+    param($key, $arg)
+
+    $line = $null
+    $cursor = $null
+    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+    [Microsoft.PowerShell.PSConsoleReadLine]::AddToHistory($line)
+    [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+}
+
+# Smart Quote
 Set-PSReadLineKeyHandler -Key '"',"'" `
                          -BriefDescription SmartInsertQuote `
                          -LongDescription "Insert paired quotes if not already on a quote" `
@@ -173,6 +126,7 @@ Set-PSReadLineKeyHandler -Key '"',"'" `
     $cursor = $null
     [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
 
+    # If text is selected, just quote it without any smarts
     if ($selectionStart -ne -1)
     {
         [Microsoft.PowerShell.PSConsoleReadLine]::Replace($selectionStart, $selectionLength, $quote + $line.SubString($selectionStart, $selectionLength) + $quote)
@@ -208,12 +162,16 @@ Set-PSReadLineKeyHandler -Key '"',"'" `
 
     $token = FindToken $tokens $cursor
 
+    # If we're on or inside a **quoted** string token (so not generic), we need to be smarter
     if ($token -is [StringToken] -and $token.Kind -ne [TokenKind]::Generic) {
+        # If we're at the start of the string, assume we're inserting a new string
         if ($token.Extent.StartOffset -eq $cursor) {
             [Microsoft.PowerShell.PSConsoleReadLine]::Insert("$quote$quote ")
             [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($cursor + 1)
             return
         }
+
+        # If we're at the end of the string, move over the closing quote if present.
         if ($token.Extent.EndOffset -eq ($cursor + 1) -and $line[$cursor] -eq $quote) {
             [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($cursor + 1)
             return
@@ -223,15 +181,18 @@ Set-PSReadLineKeyHandler -Key '"',"'" `
     if ($null -eq $token -or
         $token.Kind -eq [TokenKind]::RParen -or $token.Kind -eq [TokenKind]::RCurly -or $token.Kind -eq [TokenKind]::RBracket) {
         if ($line[0..$cursor].Where{$_ -eq $quote}.Count % 2 -eq 1) {
+            # Odd number of quotes before the cursor, insert a single quote
             [Microsoft.PowerShell.PSConsoleReadLine]::Insert($quote)
         }
         else {
+            # Insert matching quotes, move cursor to be in between the quotes
             [Microsoft.PowerShell.PSConsoleReadLine]::Insert("$quote$quote")
             [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($cursor + 1)
         }
-      return
+        return
     }
 
+    # If cursor is at the start of a token, enclose it in quotes.
     if ($token.Extent.StartOffset -eq $cursor) {
         if ($token.Kind -eq [TokenKind]::Generic -or $token.Kind -eq [TokenKind]::Identifier -or 
             $token.Kind -eq [TokenKind]::Variable -or $token.TokenFlags.hasFlag([TokenFlags]::Keyword)) {
@@ -242,9 +203,12 @@ Set-PSReadLineKeyHandler -Key '"',"'" `
             return
         }
     }
+
+    # We failed to be smart, so just insert a single quote
     [Microsoft.PowerShell.PSConsoleReadLine]::Insert($quote)
 }
 
+# Smart Brackets
 Set-PSReadLineKeyHandler -Key '(','{','[' `
                          -BriefDescription InsertPairedBraces `
                          -LongDescription "Insert matching braces" `
@@ -266,10 +230,13 @@ Set-PSReadLineKeyHandler -Key '(','{','[' `
     $cursor = $null
     [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
     
-    if ($selectionStart -ne -1) {
+    if ($selectionStart -ne -1)
+    {
+      # Text is selected, wrap it in brackets
       [Microsoft.PowerShell.PSConsoleReadLine]::Replace($selectionStart, $selectionLength, $key.KeyChar + $line.SubString($selectionStart, $selectionLength) + $closeChar)
       [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($selectionStart + $selectionLength + 2)
     } else {
+      # No text is selected, insert a pair
       [Microsoft.PowerShell.PSConsoleReadLine]::Insert("$($key.KeyChar)$closeChar")
       [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($cursor + 1)
     }
@@ -295,6 +262,7 @@ Set-PSReadLineKeyHandler -Key ')',']','}' `
     }
 }
 
+# Smart Backspace
 Set-PSReadLineKeyHandler -Key Backspace `
                          -BriefDescription SmartBackspace `
                          -LongDescription "Delete previous character or matching quotes/parens/braces" `
@@ -329,360 +297,4 @@ Set-PSReadLineKeyHandler -Key Backspace `
             [Microsoft.PowerShell.PSConsoleReadLine]::BackwardDeleteChar($key, $arg)
         }
     }
-}
-
-Set-PSReadLineKeyHandler -Key Alt+w `
-                         -BriefDescription SaveInHistory `
-                         -LongDescription "Save current line in history but do not execute" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $line = $null
-    $cursor = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-    [Microsoft.PowerShell.PSConsoleReadLine]::AddToHistory($line)
-    [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-}
-
-Set-PSReadLineKeyHandler -Key Ctrl+V `
-                         -BriefDescription PasteAsHereString `
-                         -LongDescription "Paste the clipboard text as a here string" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    Add-Type -Assembly PresentationCore
-    if ([System.Windows.Clipboard]::ContainsText())
-    {
-        $text = ([System.Windows.Clipboard]::GetText() -replace "\p{Zs}*`r?`n","`n").TrimEnd()
-        [Microsoft.PowerShell.PSConsoleReadLine]::Insert("@'`n$text`n'@")
-    }
-    else
-    {
-        [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
-    }
-}
-
-
-Set-PSReadLineKeyHandler -Key 'Alt+(' `
-                         -BriefDescription ParenthesizeSelection `
-                         -LongDescription "Put parenthesis around the selection or entire line and move the cursor to after the closing parenthesis" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $selectionStart = $null
-    $selectionLength = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetSelectionState([ref]$selectionStart, [ref]$selectionLength)
-
-    $line = $null
-    $cursor = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-    if ($selectionStart -ne -1)
-    {
-        [Microsoft.PowerShell.PSConsoleReadLine]::Replace($selectionStart, $selectionLength, '(' + $line.SubString($selectionStart, $selectionLength) + ')')
-        [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($selectionStart + $selectionLength + 2)
-    }
-    else
-    {
-        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, '(' + $line + ')')
-        [Microsoft.PowerShell.PSConsoleReadLine]::EndOfLine()
-    }
-}
-
-Set-PSReadLineKeyHandler -Key "Alt+'" `
-                         -BriefDescription ToggleQuoteArgument `
-                         -LongDescription "Toggle quotes on the argument under the cursor" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $ast = $null
-    $tokens = $null
-    $errors = $null
-    $cursor = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$ast, [ref]$tokens, [ref]$errors, [ref]$cursor)
-
-    $tokenToChange = $null
-    foreach ($token in $tokens)
-    {
-        $extent = $token.Extent
-        if ($extent.StartOffset -le $cursor -and $extent.EndOffset -ge $cursor)
-        {
-            $tokenToChange = $token
-            if ($extent.EndOffset -eq $cursor -and $foreach.MoveNext())
-            {
-                $nextToken = $foreach.Current
-                if ($nextToken.Extent.StartOffset -eq $cursor)
-                {
-                    $tokenToChange = $nextToken
-                }
-            }
-            break
-        }
-    }
-
-    if ($tokenToChange -ne $null)
-    {
-        $extent = $tokenToChange.Extent
-        $tokenText = $extent.Text
-        if ($tokenText[0] -eq '"' -and $tokenText[-1] -eq '"')
-        {
-            $replacement = $tokenText.Substring(1, $tokenText.Length - 2)
-        }
-        elseif ($tokenText[0] -eq "'" -and $tokenText[-1] -eq "'")
-        {
-            $replacement = '"' + $tokenText.Substring(1, $tokenText.Length - 2) + '"'
-        }
-        else
-        {
-            $replacement = "'" + $tokenText + "'"
-        }
-
-        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
-            $extent.StartOffset,
-            $tokenText.Length,
-            $replacement)
-    }
-}
-
-Set-PSReadLineKeyHandler -Key "Alt+%" `
-                         -BriefDescription ExpandAliases `
-                         -LongDescription "Replace all aliases with the full command" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $ast = $null
-    $tokens = $null
-    $errors = $null
-    $cursor = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$ast, [ref]$tokens, [ref]$errors, [ref]$cursor)
-
-    $startAdjustment = 0
-    foreach ($token in $tokens)
-    {
-        if ($token.TokenFlags -band [TokenFlags]::CommandName)
-        {
-            $alias = $ExecutionContext.InvokeCommand.GetCommand($token.Extent.Text, 'Alias')
-            if ($alias -ne $null)
-            {
-                $resolvedCommand = $alias.ResolvedCommandName
-                if ($resolvedCommand -ne $null)
-                {
-                    $extent = $token.Extent
-                    $length = $extent.EndOffset - $extent.StartOffset
-                    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
-                        $extent.StartOffset + $startAdjustment,
-                        $length,
-                        $resolvedCommand)
-                    $startAdjustment += ($resolvedCommand.Length - $length)
-                }
-            }
-        }
-    }
-}
-
-Set-PSReadLineKeyHandler -Key F1 `
-                         -BriefDescription CommandHelp `
-                         -LongDescription "Open the help window for the current command" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $ast = $null
-    $tokens = $null
-    $errors = $null
-    $cursor = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$ast, [ref]$tokens, [ref]$errors, [ref]$cursor)
-
-    $commandAst = $ast.FindAll( {
-        $node = $args[0]
-        $node -is [CommandAst] -and
-            $node.Extent.StartOffset -le $cursor -and
-            $node.Extent.EndOffset -ge $cursor
-        }, $true) | Select-Object -Last 1
-
-    if ($commandAst -ne $null)
-    {
-        $commandName = $commandAst.GetCommandName()
-        if ($commandName -ne $null)
-        {
-            $command = $ExecutionContext.InvokeCommand.GetCommand($commandName, 'All')
-            if ($command -is [AliasInfo])
-            {
-                $commandName = $command.ResolvedCommandName
-            }
-
-            if ($commandName -ne $null)
-            {
-                Get-Help $commandName -ShowWindow
-            }
-        }
-    }
-}
-
-$global:PSReadLineMarks = @{}
-
-Set-PSReadLineKeyHandler -Key Ctrl+J `
-                         -BriefDescription MarkDirectory `
-                         -LongDescription "Mark the current directory" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $key = [Console]::ReadKey($true)
-    $global:PSReadLineMarks[$key.KeyChar] = $pwd
-}
-
-Set-PSReadLineKeyHandler -Key Ctrl+j `
-                         -BriefDescription JumpDirectory `
-                         -LongDescription "Goto the marked directory" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $key = [Console]::ReadKey()
-    $dir = $global:PSReadLineMarks[$key.KeyChar]
-    if ($dir)
-    {
-        Set-Location $dir
-        [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
-    }
-}
-
-Set-PSReadLineKeyHandler -Key Alt+j `
-                         -BriefDescription ShowDirectoryMarks `
-                         -LongDescription "Show the currently marked directories" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $global:PSReadLineMarks.GetEnumerator() | ForEach-Object {
-        [PSCustomObject]@{Key = $_.Key; Dir = $_.Value} } |
-        Format-Table -AutoSize | Out-Host
-
-    [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
-}
-
-Set-PSReadLineOption -CommandValidationHandler {
-    param([CommandAst]$CommandAst)
-
-    switch ($CommandAst.GetCommandName())
-    {
-        'git' {
-            $gitCmd = $CommandAst.CommandElements[1].Extent
-            switch ($gitCmd.Text)
-            {
-                'cmt' {
-                    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
-                        $gitCmd.StartOffset, $gitCmd.EndOffset - $gitCmd.StartOffset, 'commit')
-                }
-            }
-        }
-    }
-}
-
-Set-PSReadLineKeyHandler -Key RightArrow `
-                         -BriefDescription ForwardCharAndAcceptNextSuggestionWord `
-                         -LongDescription "Move cursor one character to the right in the current editing line and accept the next word in suggestion when it's at the end of current editing line" `
-                         -ScriptBlock {
-    param($key, $arg)
-
-    $line = $null
-    $cursor = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-
-    if ($cursor -lt $line.Length) {
-        [Microsoft.PowerShell.PSConsoleReadLine]::ForwardChar($key, $arg)
-    } else {
-        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptNextSuggestionWord($key, $arg)
-    }
-}
-
-Set-PSReadLineKeyHandler -Key Alt+a `
-                         -BriefDescription SelectCommandArguments `
-                         -LongDescription "Set current selection to next command argument in the command line. Use of digit argument selects argument by position" `
-                         -ScriptBlock {
-    param($key, $arg)
-  
-    $ast = $null
-    $cursor = $null
-    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$ast, [ref]$null, [ref]$null, [ref]$cursor)
-  
-    $asts = $ast.FindAll( {
-        $args[0] -is [System.Management.Automation.Language.ExpressionAst] -and
-        $args[0].Parent -is [System.Management.Automation.Language.CommandAst] -and
-        $args[0].Extent.StartOffset -ne $args[0].Parent.Extent.StartOffset
-      }, $true)
-  
-    if ($asts.Count -eq 0) {
-        [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
-        return
-    }
-    
-    $nextAst = $null
-
-    if ($null -ne $arg) {
-        $nextAst = $asts[$arg - 1]
-    }
-    else {
-        foreach ($ast in $asts) {
-            if ($ast.Extent.StartOffset -ge $cursor) {
-                $nextAst = $ast
-                break
-            }
-        } 
-        
-        if ($null -eq $nextAst) {
-            $nextAst = $asts[0]
-        }
-    }
-
-    $startOffsetAdjustment = 0
-    $endOffsetAdjustment = 0
-
-    if ($nextAst -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
-        $nextAst.StringConstantType -ne [System.Management.Automation.Language.StringConstantType]::BareWord) {
-            $startOffsetAdjustment = 1
-            $endOffsetAdjustment = 2
-    }
-  
-    [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($nextAst.Extent.StartOffset + $startOffsetAdjustment)
-    [Microsoft.PowerShell.PSConsoleReadLine]::SetMark($null, $null)
-    [Microsoft.PowerShell.PSConsoleReadLine]::SelectForwardChar($null, ($nextAst.Extent.EndOffset - $nextAst.Extent.StartOffset) - $endOffsetAdjustment)
-}
-
-
-Set-PSReadLineOption -PredictionSource History
-Set-PSReadLineOption -PredictionViewStyle ListView
-Set-PSReadLineOption -EditMode Windows
-
-Set-PSReadLineKeyHandler -Key Ctrl+Shift+b `
-                         -BriefDescription BuildCurrentDirectory `
-                         -LongDescription "Build the current directory" `
-                         -ScriptBlock {
-    [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-    [Microsoft.PowerShell.PSConsoleReadLine]::Insert("dotnet build")
-    [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
-}
-
-Set-PSReadLineKeyHandler -Key Ctrl+f5 `
-                         -BriefDescription BuildCurrentDirectory `
-                         -LongDescription "Build the current directory" `
-                         -ScriptBlock {
-    [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-    [Microsoft.PowerShell.PSConsoleReadLine]::Insert("dotnet run")
-    [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
-}
-
-Set-PSReadLineKeyHandler -Key Ctrl+Shift+t `
-                         -BriefDescription BuildCurrentDirectory `
-                         -LongDescription "Build the current directory" `
-                         -ScriptBlock {
-    [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-    [Microsoft.PowerShell.PSConsoleReadLine]::Insert("dotnet test")
-    [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
-}
-
-# Import the Chocolatey Profile that contains the necessary code to enable
-# tab-completions to function for `choco`.
-# Be aware that if you are missing these lines from your profile, tab completion
-# for `choco` will not function.
-# See https://ch0.co/tab-completion for details.
-$ChocolateyProfile = "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
-if (Test-Path($ChocolateyProfile)) {
-  Import-Module "$ChocolateyProfile"
 }
